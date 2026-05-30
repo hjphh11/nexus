@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
+import { uploadBlob } from "@/lib/blob";
 
 export async function createResource(formData: FormData) {
   const session = await auth();
@@ -30,23 +31,9 @@ export async function createResource(formData: FormData) {
   let fileSize: number | null = null;
   let fileType: string | null = null;
 
-  // Handle file upload if present
+  // Handle file upload via Vercel Blob
   if (file && file.size > 0) {
-    const bytes = await file.arrayBuffer();
-    const buffer = Buffer.from(bytes);
-
-    // Store in public/uploads/
-    const fs = await import("fs/promises");
-    const path = await import("path");
-
-    const uploadDir = path.join(process.cwd(), "public", "uploads");
-    await fs.mkdir(uploadDir, { recursive: true });
-
-    const uniqueName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-    const filePath = path.join(uploadDir, uniqueName);
-    await fs.writeFile(filePath, buffer);
-
-    fileUrl = `/uploads/${uniqueName}`;
+    fileUrl = await uploadBlob(file, "resources");
     fileName = file.name;
     fileSize = file.size;
     fileType = file.type;

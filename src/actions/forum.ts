@@ -1,10 +1,9 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
+import { uploadBlob } from "@/lib/blob";
 
 // ═══ BOARDS ═══
 
@@ -130,34 +129,24 @@ export async function createPost(formData: FormData) {
 
   const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
 
-  // Setup file storage
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
-
-  // Handle file attachment
+  // Handle file attachment via Vercel Blob
   let fileUrl: string | null = null;
   let fileName: string | null = null;
   let fileSize: number | null = null;
   let fileType: string | null = null;
 
   if (file && file.size > 0) {
-    const bytes = await file.arrayBuffer();
-    const uniqueName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-    await writeFile(path.join(uploadDir, uniqueName), Buffer.from(bytes));
-    fileUrl = `/uploads/${uniqueName}`;
+    fileUrl = await uploadBlob(file, "forum");
     fileName = file.name;
     fileSize = file.size;
     fileType = file.type;
   }
 
-  // Save images
+  // Save images via Vercel Blob
   const imageUrls: string[] = [];
   for (const img of imageFiles) {
     if (img && img.size > 0) {
-      const bytes = await img.arrayBuffer();
-      const uniqueName = `${Date.now()}-${Math.random().toString(36).slice(2)}-${img.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-      await writeFile(path.join(uploadDir, uniqueName), Buffer.from(bytes));
-      imageUrls.push(`/uploads/${uniqueName}`);
+      imageUrls.push(await uploadBlob(img, "forum"));
     }
   }
 

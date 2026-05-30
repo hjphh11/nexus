@@ -2,6 +2,7 @@
 export async function generateCaptchaImages(): Promise<{
   bgUrl: string;
   puzzleUrl: string;
+  x: number;
 }> {
   const W = 260;
   const H = 150;

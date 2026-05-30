@@ -1,15 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
-
-async function saveFile(f: File, dir: string): Promise<string> {
-  const bytes = await f.arrayBuffer();
-  const name = `${Date.now()}-${Math.random().toString(36).slice(2)}-${f.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-  await writeFile(path.join(dir, name), Buffer.from(bytes));
-  return name;
-}
+import { uploadBlob } from "@/lib/blob";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -25,7 +17,6 @@ export async function POST(req: NextRequest) {
   const driveUrl = (formData.get("driveUrl") as string) || null;
   const driveCode = (formData.get("driveCode") as string) || null;
 
-  // Support multiple files
   const files = formData.getAll("files") as File[];
   const imageFiles = formData.getAll("images") as File[];
 
@@ -34,19 +25,15 @@ export async function POST(req: NextRequest) {
   }
 
   const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
 
   const imageUrls: string[] = [];
   for (const img of imageFiles) {
-    if (img?.size > 0) imageUrls.push(`/uploads/${await saveFile(img, uploadDir)}`);
+    if (img?.size > 0) imageUrls.push(await uploadBlob(img, "resources"));
   }
 
-  // Create a resource for EACH file (batch upload)
   const createdIds: string[] = [];
 
   if (files.length === 0) {
-    // No files — create one resource (e.g. drive link only)
     const resource = await db.resource.create({
       data: {
         title: title || "未命名资源",
@@ -61,13 +48,14 @@ export async function POST(req: NextRequest) {
   } else {
     for (const file of files) {
       if (!file || file.size === 0) continue;
-      const name = await saveFile(file, uploadDir);
+      const url = await uploadBlob(file, "resources");
       const resource = await db.resource.create({
         data: {
           title: files.length > 1 ? `${title || file.name} (${file.name})` : (title || file.name),
           description, type,
           tags: JSON.stringify(tags),
-          fileUrl: `/uploads/${name}`,
+          fileUrl: url,
+          fileKey: url,
           fileName: file.name,
           fileSize: file.size,
           fileType: file.type,

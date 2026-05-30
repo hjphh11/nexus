@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 import { db } from "@/lib/db";
 import { auth } from "@/auth";
+import { uploadBlob } from "@/lib/blob";
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -24,15 +23,6 @@ export async function POST(req: NextRequest) {
   if (!content) return NextResponse.json({ error: "请输入内容" }, { status: 400 });
 
   const tags = tagsStr.split(",").map((t) => t.trim()).filter(Boolean);
-  const uploadDir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(uploadDir, { recursive: true });
-
-  async function saveFile(f: File): Promise<string> {
-    const bytes = await f.arrayBuffer();
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2)}-${f.name.replace(/[^a-zA-Z0-9.\-_]/g, "_")}`;
-    await writeFile(path.join(uploadDir, name), Buffer.from(bytes));
-    return `/uploads/${name}`;
-  }
 
   let fileUrl: string | null = null;
   let fileName: string | null = null;
@@ -40,7 +30,7 @@ export async function POST(req: NextRequest) {
   let fileType: string | null = null;
 
   if (file && file.size > 0) {
-    fileUrl = await saveFile(file);
+    fileUrl = await uploadBlob(file, "forum");
     fileName = file.name;
     fileSize = file.size;
     fileType = file.type;
@@ -49,7 +39,7 @@ export async function POST(req: NextRequest) {
   const imageUrls: string[] = [];
   for (const img of imageFiles) {
     if (img && img.size > 0) {
-      imageUrls.push(await saveFile(img));
+      imageUrls.push(await uploadBlob(img, "forum"));
     }
   }
 
