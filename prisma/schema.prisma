@@ -1,0 +1,180 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:../prisma/dev.db"
+}
+
+model User {
+  id             String    @id @default(cuid())
+  name           String?
+  email          String    @unique
+  emailVerified  DateTime?
+  image          String?
+  notifySettings String   @default("{}")
+  hashedPassword String?
+  role           String    @default("USER")
+  bio            String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  resources      Resource[]
+  posts          Post[]
+  comments       Comment[]
+  sessions       Session[]
+  accounts       Account[]
+  upvotedPosts   PostUpvote[]
+  notifications  Notification[]
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Resource {
+  id          String   @id @default(cuid())
+  title       String
+  description String?
+  type        String   @default("OTHER")
+  tags        String   @default("[]")
+  fileUrl     String?
+  fileKey     String?
+  fileName    String?
+  fileSize    Int?
+  fileType    String?
+  driveUrl    String?
+  driveCode   String?
+  images      String   @default("[]")
+  metadata    String?
+  views       Int      @default(0)
+  downloads   Int      @default(0)
+  status      String   @default("published")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  author   User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+  comments Comment[]
+
+  @@index([authorId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+model Board {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  icon        String?
+  sortOrder   Int      @default(0)
+  postCount   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  posts Post[]
+
+  @@index([slug])
+}
+
+model Post {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  tags      String   @default("[]")
+  fileUrl   String?
+  fileName  String?
+  fileSize  Int?
+  fileType  String?
+  images    String   @default("[]")
+  views     Int      @default(0)
+  upvotes   Int      @default(0)
+  pinned    Boolean  @default(false)
+  locked    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author   User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+  board    Board    @relation(fields: [boardId], references: [id], onDelete: Cascade)
+  boardId  String
+  comments Comment[]
+  upvoters PostUpvote[]
+
+  @@index([boardId])
+  @@index([authorId])
+  @@index([createdAt])
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String?
+  link      String?
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+}
+
+model PostUpvote {
+  id     String @id @default(cuid())
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId String
+  post   Post   @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId String
+
+  @@unique([userId, postId])
+}
+
+model Comment {
+  id        String   @id @default(cuid())
+  content   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  author   User   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  authorId String
+
+  resource   Resource? @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+  resourceId String?
+  post       Post?     @relation(fields: [postId], references: [id], onDelete: Cascade)
+  postId     String?
+  parent     Comment?  @relation("Replies", fields: [parentId], references: [id], onDelete: Cascade)
+  parentId   String?
+  replies    Comment[] @relation("Replies")
+
+  @@index([resourceId])
+  @@index([postId])
+  @@index([parentId])
+}

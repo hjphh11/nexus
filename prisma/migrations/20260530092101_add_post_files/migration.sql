@@ -1,0 +1,5 @@
+-- AlterTable
+ALTER TABLE "Post" ADD COLUMN "fileName" TEXT;
+ALTER TABLE "Post" ADD COLUMN "fileSize" INTEGER;
+ALTER TABLE "Post" ADD COLUMN "fileType" TEXT;
+ALTER TABLE "Post" ADD COLUMN "fileUrl" TEXT;
