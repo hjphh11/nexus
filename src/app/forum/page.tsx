@@ -2,6 +2,8 @@ import Link from "next/link";
 import { MessageSquare, BookOpen, Terminal, BarChart3, Code, Wrench } from "lucide-react";
 import { db } from "@/lib/db";
 
+export const dynamic = "force-dynamic";
+
 function BoardIcon({ name }: { name: string }) {
   const map: Record<string, React.ElementType> = {
     BookOpen, Terminal, BarChart3, Code, MessageSquare, Wrench,
