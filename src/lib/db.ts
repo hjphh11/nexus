@@ -11,7 +11,6 @@ function createPrismaClient() {
     url: process.env.TURSO_DATABASE_URL!,
   });
   const adapter = new PrismaLibSQL(libsql);
-  // @ts-expect-error - adapter not in v5 types but works at runtime
   return new PrismaClient({ adapter });
 }
 
