@@ -5,7 +5,7 @@ import { db } from "@/lib/db";
 
 export async function registerUser(formData: FormData) {
   const name = formData.get("name") as string;
-  const email = formData.get("email") as string;
+  const email = (formData.get("login") as string); // form uses name="login"
   const password = formData.get("password") as string;
   const confirmPassword = formData.get("confirmPassword") as string;
 
