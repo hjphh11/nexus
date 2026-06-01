@@ -1,9 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { Upload, ArrowRight, Check, X, Tag, Image, Trash2, Plus, Link, HardDrive, Globe, CloudUpload, Send } from "lucide-react";
+import { useState, useRef } from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Upload, Check, X, Tag, Image, Trash2, Plus, Link, HardDrive, Globe, CloudUpload, Send, Loader2 } from "lucide-react";
 
 const typeOptions = [
   { value: "DOCUMENT", label: "文档" },
@@ -20,17 +19,19 @@ interface UploadedFile {
   url: string; name: string; size: number; type: string;
 }
 
+interface FileItem {
+  file: File;
+  status: "pending" | "uploading" | "done";
+  progress: number;
+  result?: UploadedFile;
+}
+
 export default function UploadPage() {
-  const router = useRouter();
-
-  // Step 1: Files selection + upload
-  const [files, setFiles] = useState<File[]>([]);
+  const [fileItems, setFileItems] = useState<FileItem[]>([]);
   const [images, setImages] = useState<File[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [uploadedImages, setUploadedImages] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
 
-  // Step 2: Metadata + publish
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [type, setType] = useState("OTHER");
@@ -43,16 +44,67 @@ export default function UploadPage() {
   const [success, setSuccess] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
-  async function handleUploadFiles() {
-    if (files.length === 0 && images.length === 0) {
-      setError("请先选择文件或图片");
-      return;
-    }
-    setError("");
-    setUploading(true);
+  const xhrRefs = useRef<Map<number, XMLHttpRequest>>(new Map());
+
+  function addFiles(newFiles: File[]) {
+    setFileItems((prev) => [
+      ...prev,
+      ...newFiles.map((file) => ({ file, status: "pending" as const, progress: 0 })),
+    ]);
+  }
+
+  function uploadFile(index: number) {
+    const item = fileItems[index];
+    if (!item || item.status !== "pending") return;
+
+    setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "uploading" as const, progress: 0 } : f)));
 
     const formData = new FormData();
-    files.forEach((f) => formData.append("files", f));
+    formData.append("files", item.file);
+
+    const xhr = new XMLHttpRequest();
+    xhrRefs.current.set(index, xhr);
+
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, progress: Math.round((e.loaded / e.total) * 100) } : f)));
+      }
+    };
+
+    xhr.onload = () => {
+      xhrRefs.current.delete(index);
+      try {
+        const result = JSON.parse(xhr.responseText);
+        if (result?.error) {
+          setError(result.error);
+          setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
+        } else if (result?.files?.[0]) {
+          setFileItems((prev) => prev.map((f, i) =>
+            i === index
+              ? { ...f, status: "done" as const, progress: 100, result: result.files[0] }
+              : f
+          ));
+        }
+      } catch {
+        setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
+        setError("上传失败，请重试");
+      }
+    };
+
+    xhr.onerror = () => {
+      xhrRefs.current.delete(index);
+      setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
+      setError("网络错误，请重试");
+    };
+
+    xhr.open("POST", "/api/upload/file");
+    xhr.send(formData);
+  }
+
+  async function uploadImages() {
+    if (images.length === 0) return;
+    setImageUploading(true);
+    const formData = new FormData();
     images.forEach((img) => formData.append("images", img));
 
     try {
@@ -61,21 +113,20 @@ export default function UploadPage() {
       if (result?.error) {
         setError(result.error);
       } else {
-        setUploadedFiles((prev) => [...prev, ...result.files]);
         setUploadedImages((prev) => [...prev, ...result.images]);
-        setFiles([]);
         setImages([]);
       }
     } catch {
-      setError("网络错误，请重试");
+      setError("上传图片失败");
     }
-    setUploading(false);
+    setImageUploading(false);
   }
 
   async function handlePublish() {
+    const doneFiles = fileItems.filter((f) => f.status === "done" && f.result);
     if (!title) { setError("请输入资源名称"); return; }
-    if (uploadMode === "file" && uploadedFiles.length === 0) {
-      setError("请先上传文件");
+    if (uploadMode === "file" && doneFiles.length === 0) {
+      setError("请先上传至少一个文件");
       return;
     }
     setError("");
@@ -86,7 +137,7 @@ export default function UploadPage() {
     formData.append("description", description);
     formData.append("type", type);
     formData.append("tags", tags);
-    uploadedFiles.forEach((f) => formData.append("uploadedFiles", JSON.stringify(f)));
+    doneFiles.forEach((f) => formData.append("uploadedFiles", JSON.stringify(f.result!)));
     uploadedImages.forEach((url) => formData.append("uploadedImages", url));
     if (uploadMode === "drive") {
       formData.append("driveUrl", driveUrl);
@@ -100,8 +151,7 @@ export default function UploadPage() {
         setError(result.error);
       } else {
         setSuccess(`成功发布 ${result.count || 1} 个资源`);
-        setUploadedFiles([]);
-        setUploadedImages([]);
+        setFileItems([]); setUploadedImages([]);
         setTitle(""); setDescription(""); setTags("");
         setTimeout(() => setSuccess(""), 4000);
       }
@@ -114,8 +164,11 @@ export default function UploadPage() {
   function handleDrop(e: React.DragEvent) {
     e.preventDefault();
     setDragOver(false);
-    setFiles((prev) => [...prev, ...Array.from(e.dataTransfer.files)]);
+    addFiles(Array.from(e.dataTransfer.files));
   }
+
+  const doneCount = fileItems.filter((f) => f.status === "done").length;
+  const uploadingCount = fileItems.filter((f) => f.status === "uploading").length;
 
   return (
     <div className="max-w-3xl mx-auto px-6 py-12">
@@ -131,9 +184,11 @@ export default function UploadPage() {
             <div className="flex items-center gap-2 mb-5">
               <span className="w-6 h-6 rounded-full bg-primary/15 border border-primary/20 flex items-center justify-center text-xs font-bold text-primary">1</span>
               <h2 className="text-lg font-heading font-bold text-foreground">上传文件</h2>
+              {doneCount > 0 && (
+                <span className="text-xs text-success ml-auto">{doneCount} 个文件已就绪</span>
+              )}
             </div>
 
-            {/* Upload mode toggle */}
             <div className="flex rounded-xl bg-surface-hover p-1 mb-5">
               <button type="button" onClick={() => setUploadMode("file")}
                 className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium rounded-lg transition-all ${
@@ -157,44 +212,91 @@ export default function UploadPage() {
                   onDragLeave={() => setDragOver(false)}
                   onDrop={handleDrop}
                   className={`relative rounded-xl border-2 border-dashed transition-all duration-300 p-6 text-center mb-4 ${
-                    dragOver ? "border-primary/60 bg-primary/5"
-                      : files.length > 0 ? "border-success/30 bg-success/5"
-                      : "border-border/40 hover:border-primary/30"
+                    dragOver ? "border-primary/60 bg-primary/5" : "border-border/40 hover:border-primary/30"
                   }`}
                 >
-                  <div className="space-y-3">
-                    {files.length > 0 ? (
-                      <div className="space-y-2 max-h-48 overflow-y-auto">
-                        {files.map((f, i) => (
-                          <div key={`${f.name}-${i}`} className="flex items-center justify-between p-2 rounded-lg bg-surface-hover border border-border/30">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <Check className="w-4 h-4 text-success shrink-0" />
-                              <span className="text-sm text-foreground truncate">{f.name}</span>
-                              <span className="text-[11px] text-muted-foreground shrink-0">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                            </div>
-                            <button type="button" onClick={() => setFiles((p) => p.filter((_, j) => j !== i))}
-                              className="text-xs text-accent hover:underline shrink-0 ml-2">移除</button>
-                          </div>
-                        ))}
-                        <button type="button" onClick={() => setFiles([])} className="text-xs text-accent hover:underline">清空全部</button>
-                      </div>
-                    ) : (
-                      <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto">
-                        <Upload className="w-6 h-6 text-primary" />
-                      </div>
-                    )}
-                    <p className="text-foreground font-medium">{files.length > 0 ? "继续添加文件" : "拖拽文件到此处"}</p>
-                    <p className="text-xs text-muted-foreground">支持批量上传，可多选文件或多次追加</p>
-                    <input
-                      type="file" multiple key={files.length}
-                      onChange={(e) => setFiles((prev) => [...prev, ...Array.from(e.target.files || [])])}
-                      className="block mx-auto text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-primary/20 file:bg-primary/10 file:text-primary file:text-sm file:font-medium hover:file:bg-primary/20 file:transition-all file:cursor-pointer"
-                    />
+                  <div className="w-12 h-12 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-3">
+                    <Upload className="w-6 h-6 text-primary" />
                   </div>
+                  <p className="text-foreground font-medium mb-1">拖拽文件到此处</p>
+                  <p className="text-xs text-muted-foreground mb-3">支持多文件上传，逐个点击上传按钮</p>
+                  <input
+                    type="file" multiple key={fileItems.length}
+                    onChange={(e) => addFiles(Array.from(e.target.files || []))}
+                    className="block mx-auto text-sm text-muted-foreground file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border file:border-primary/20 file:bg-primary/10 file:text-primary file:text-sm file:font-medium hover:file:bg-primary/20 file:transition-all file:cursor-pointer"
+                  />
                 </div>
 
+                {/* File list */}
+                {fileItems.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs text-muted-foreground">待上传文件 ({fileItems.length})</p>
+                      <button type="button" onClick={() => setFileItems([])} className="text-xs text-accent hover:underline">清空全部</button>
+                    </div>
+                    <AnimatePresence>
+                      {fileItems.map((item, i) => (
+                        <motion.div key={`${item.file.name}-${i}-${item.file.size}`}
+                          initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }}
+                          className={`p-3 rounded-xl border transition-colors ${
+                            item.status === "done" ? "bg-success/5 border-success/20"
+                              : item.status === "uploading" ? "bg-primary/5 border-primary/20"
+                              : "bg-surface-hover border-border/30"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                {item.status === "done" ? (
+                                  <Check className="w-4 h-4 text-success shrink-0" />
+                                ) : item.status === "uploading" ? (
+                                  <Loader2 className="w-4 h-4 text-primary shrink-0 animate-spin" />
+                                ) : (
+                                  <Upload className="w-4 h-4 text-muted-foreground shrink-0" />
+                                )}
+                                <span className="text-sm text-foreground truncate">{item.file.name}</span>
+                                <span className="text-[11px] text-muted-foreground shrink-0">{(item.file.size / 1024 / 1024).toFixed(1)} MB</span>
+                              </div>
+
+                              {/* Progress bar */}
+                              {item.status === "uploading" && (
+                                <div className="mt-2 w-full h-1.5 rounded-full bg-surface-hover overflow-hidden">
+                                  <motion.div className="h-full rounded-full bg-primary"
+                                    initial={{ width: 0 }}
+                                    animate={{ width: `${item.progress}%` }}
+                                    transition={{ duration: 0.1 }}
+                                  />
+                                </div>
+                              )}
+                              {item.status === "uploading" && (
+                                <p className="text-[11px] text-primary mt-1">{item.progress}%</p>
+                              )}
+                            </div>
+
+                            <div className="flex items-center gap-2 shrink-0">
+                              {item.status === "pending" && (
+                                <button type="button" onClick={() => uploadFile(i)}
+                                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-primary/15 text-primary text-xs font-medium border border-primary/20 hover:bg-primary/25 transition-colors">
+                                  <CloudUpload className="w-3 h-3" /> 上传
+                                </button>
+                              )}
+                              {item.status === "done" && (
+                                <span className="text-[11px] text-success font-medium whitespace-nowrap">已上传</span>
+                              )}
+                              <button type="button" onClick={() => setFileItems((prev) => prev.filter((_, j) => j !== i))}
+                                className="text-xs text-muted-foreground hover:text-accent transition-colors">
+                                <X className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </AnimatePresence>
+                  </div>
+                )}
+
                 {/* Image upload */}
-                <div>
+                <div className="mt-5">
                   <label className="block text-sm text-foreground font-medium mb-3">
                     <Image className="w-3.5 h-3.5 inline mr-1" />
                     展示图片（可选）
@@ -209,6 +311,13 @@ export default function UploadPage() {
                         </button>
                       </div>
                     ))}
+                    {images.length > 0 && (
+                      <button type="button" onClick={uploadImages} disabled={imageUploading}
+                        className="flex items-center gap-1 px-3 h-10 rounded-xl bg-primary/10 border border-primary/20 text-primary text-xs font-medium hover:bg-primary/20 transition-colors disabled:opacity-50">
+                        {imageUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <CloudUpload className="w-3.5 h-3.5" />}
+                        上传图片
+                      </button>
+                    )}
                     <label className="w-24 h-24 rounded-xl border-2 border-dashed border-border/40 hover:border-primary/30 flex items-center justify-center cursor-pointer transition-all">
                       <Plus className="w-6 h-6 text-muted-foreground" />
                       <input type="file" accept="image/*" multiple
@@ -216,21 +325,12 @@ export default function UploadPage() {
                         className="hidden" />
                     </label>
                   </div>
-                </div>
-
-                {/* Upload button */}
-                <button type="button" onClick={handleUploadFiles} disabled={uploading || (files.length === 0 && images.length === 0)}
-                  className="mt-4 w-full py-3 rounded-xl bg-primary/15 text-primary border border-primary/20 font-semibold text-sm hover:bg-primary/20 transition-all flex items-center justify-center gap-2 disabled:opacity-40 disabled:cursor-not-allowed">
-                  {uploading ? (
-                    <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
-                      className="w-4 h-4 border-2 border-primary/30 border-t-primary rounded-full" />
-                  ) : (
-                    <><CloudUpload className="w-4 h-4" /> 上传到服务器</>
+                  {uploadedImages.length > 0 && (
+                    <p className="text-xs text-success">{uploadedImages.length} 张图片已上传</p>
                   )}
-                </button>
+                </div>
               </>
             ) : (
-              /* Drive link inputs */
               <div className="space-y-4">
                 <input type="url" value={driveUrl} onChange={(e) => setDriveUrl(e.target.value)}
                   placeholder="网盘链接地址（百度网盘 / 阿里云盘 / 夸克等）"
@@ -238,24 +338,6 @@ export default function UploadPage() {
                 <input type="text" value={driveCode} onChange={(e) => setDriveCode(e.target.value)}
                   placeholder="提取码（选填）"
                   className="w-full px-4 py-3 rounded-xl bg-surface-hover border border-border/50 text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:border-primary/40 transition-all" />
-              </div>
-            )}
-
-            {/* Uploaded files list */}
-            {uploadedFiles.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <p className="text-xs text-muted-foreground">已上传 {uploadedFiles.length} 个文件</p>
-                {uploadedFiles.map((f, i) => (
-                  <div key={i} className="flex items-center justify-between p-2 rounded-lg bg-success/5 border border-success/20">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Check className="w-4 h-4 text-success shrink-0" />
-                      <span className="text-sm text-foreground truncate">{f.name}</span>
-                      <span className="text-[11px] text-muted-foreground shrink-0">{(f.size / 1024 / 1024).toFixed(1)} MB</span>
-                    </div>
-                    <button type="button" onClick={() => setUploadedFiles((p) => p.filter((_, j) => j !== i))}
-                      className="text-xs text-accent hover:underline shrink-0 ml-2">移除</button>
-                  </div>
-                ))}
               </div>
             )}
           </div>
@@ -303,25 +385,32 @@ export default function UploadPage() {
           </div>
 
           {/* Error / Success */}
-          {error && (
-            <div className="p-3 rounded-lg bg-accent/10 border border-accent/20 text-sm text-accent flex items-center gap-2">
-              <X className="w-4 h-4" /> {error}
-            </div>
-          )}
-          {success && (
-            <div className="p-3 rounded-lg bg-success/10 border border-success/20 text-sm text-success flex items-center gap-2">
-              <Check className="w-4 h-4" /> {success}
-            </div>
-          )}
+          <AnimatePresence>
+            {error && (
+              <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                className="p-3 rounded-lg bg-accent/10 border border-accent/20 text-sm text-accent flex items-center gap-2">
+                <X className="w-4 h-4" /> {error}
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <AnimatePresence>
+            {success && (
+              <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
+                className="p-3 rounded-lg bg-success/10 border border-success/20 text-sm text-success flex items-center gap-2">
+                <Check className="w-4 h-4" /> {success}
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           {/* Publish button */}
-          <button onClick={handlePublish} disabled={publishing || !title || (uploadMode === "file" && uploadedFiles.length === 0)}
+          <button onClick={handlePublish}
+            disabled={publishing || !title || (uploadMode === "file" && doneCount === 0)}
             className="relative w-full py-3.5 rounded-xl bg-primary text-primary-foreground font-semibold text-sm hover:neon-glow transition-all duration-300 flex items-center justify-center gap-2 disabled:opacity-50">
             {publishing ? (
               <motion.span animate={{ rotate: 360 }} transition={{ duration: 1, repeat: Infinity, ease: "linear" }}
                 className="w-4 h-4 border-2 border-primary-foreground/30 border-t-primary-foreground rounded-full" />
             ) : (
-              <><Send className="w-4 h-4" /> 发布资源</>
+              <><Send className="w-4 h-4" /> 发布资源 {doneCount > 0 ? `(${doneCount} 个文件)` : ""}</>
             )}
           </button>
         </div>
