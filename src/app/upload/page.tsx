@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { upload } from "@vercel/blob/client";
 import { Upload, Check, X, Tag, Image, Trash2, Plus, Link, HardDrive, Globe, CloudUpload, Send, Loader2 } from "lucide-react";
 
 const typeOptions = [
@@ -44,8 +45,6 @@ export default function UploadPage() {
   const [success, setSuccess] = useState("");
   const [dragOver, setDragOver] = useState(false);
 
-  const xhrRefs = useRef<Map<number, XMLHttpRequest>>(new Map());
-
   function addFiles(newFiles: File[]) {
     setFileItems((prev) => [
       ...prev,
@@ -53,71 +52,69 @@ export default function UploadPage() {
     ]);
   }
 
-  function uploadFile(index: number) {
+  async function uploadFile(index: number) {
     const item = fileItems[index];
     if (!item || item.status !== "pending") return;
 
     setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "uploading" as const, progress: 0 } : f)));
 
-    const formData = new FormData();
-    formData.append("files", item.file);
-
-    const xhr = new XMLHttpRequest();
-    xhrRefs.current.set(index, xhr);
-
-    xhr.upload.onprogress = (e) => {
-      if (e.lengthComputable) {
-        setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, progress: Math.round((e.loaded / e.total) * 100) } : f)));
-      }
-    };
-
-    xhr.onload = () => {
-      xhrRefs.current.delete(index);
-      try {
-        const result = JSON.parse(xhr.responseText);
-        if (result?.error) {
-          setError(result.error);
-          setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
-        } else if (result?.files?.[0]) {
-          setFileItems((prev) => prev.map((f, i) =>
-            i === index
-              ? { ...f, status: "done" as const, progress: 100, result: result.files[0] }
-              : f
-          ));
-        }
-      } catch {
+    try {
+      // Get client upload token
+      const tokenRes = await fetch("/api/upload/token");
+      const tokenData = await tokenRes.json();
+      if (!tokenData.token) {
+        setError(tokenData.error || "无法获取上传凭证");
         setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
-        setError("上传失败，请重试");
+        return;
       }
-    };
 
-    xhr.onerror = () => {
-      xhrRefs.current.delete(index);
+      const name = `resources/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${item.file.name.replace(/[^a-zA-Z0-9.\\-_]/g, "_")}`;
+
+      const blob = await upload(name, item.file, {
+        access: "public",
+        token: tokenData.token,
+      });
+
+      setFileItems((prev) => prev.map((f, i) =>
+        i === index
+          ? {
+              ...f,
+              status: "done" as const,
+              progress: 100,
+              result: {
+                url: blob.url,
+                name: item.file.name,
+                size: item.file.size,
+                type: item.file.type,
+              },
+            }
+          : f
+      ));
+    } catch (err: any) {
       setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
-      setError("网络错误，请重试");
-    };
-
-    xhr.open("POST", "/api/upload/file");
-    xhr.send(formData);
+      setError(err?.message || "上传失败，请重试");
+    }
   }
 
   async function uploadImages() {
     if (images.length === 0) return;
     setImageUploading(true);
-    const formData = new FormData();
-    images.forEach((img) => formData.append("images", img));
 
     try {
-      const res = await fetch("/api/upload/file", { method: "POST", body: formData });
-      const result = await res.json();
-      if (result?.error) {
-        setError(result.error);
-      } else {
-        setUploadedImages((prev) => [...prev, ...result.images]);
-        setImages([]);
+      const tokenRes = await fetch("/api/upload/token");
+      const tokenData = await tokenRes.json();
+      if (!tokenData.token) { setError(tokenData.error || "无法获取凭证"); setImageUploading(false); return; }
+
+      const urls: string[] = [];
+      for (const img of images) {
+        const name = `resources/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${img.name.replace(/[^a-zA-Z0-9.\\-_]/g, "_")}`;
+        const blob = await upload(name, img, { access: "public", handleUploadUrl: "/api/upload/file", token: tokenData.token });
+        urls.push(blob.url);
       }
-    } catch {
-      setError("上传图片失败");
+      setUploadedImages((prev) => [...prev, ...urls]);
+      setImages([]);
+    } catch (err: any) {
+      setError(err?.message || "上传图片失败");
     }
     setImageUploading(false);
   }
