@@ -49,20 +49,25 @@ export default function UploadPage() {
     }
     images.forEach((img) => formData.append("images", img));
 
-    const res = await fetch("/api/upload", {
-      method: "POST",
-      body: formData,
-    });
-    const result = await res.json();
+    try {
+      const res = await fetch("/api/upload", {
+        method: "POST",
+        body: formData,
+      });
+      const result = await res.json();
 
-    setLoading(false);
+      setLoading(false);
 
-    if (result?.error) {
-      setError(result.error);
-    } else if (result?.success) {
+      if (result?.error) {
+        setError(result.error);
+      } else if (result?.success) {
       setSuccess(`成功上传 ${result.count || 1} 个资源`);
       setFiles([]); setImages([]); setTitle(""); setDescription(""); setTags("");
       setTimeout(() => setSuccess(""), 4000);
+      }
+    } catch {
+      setLoading(false);
+      setError("网络错误，请重试");
     }
   }
 
