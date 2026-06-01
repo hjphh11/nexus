@@ -59,20 +59,16 @@ export default function UploadPage() {
     setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "uploading" as const, progress: 0 } : f)));
 
     try {
-      // Get client upload token
-      const tokenRes = await fetch("/api/upload/token");
-      const tokenData = await tokenRes.json();
-      if (!tokenData.token) {
-        setError(tokenData.error || "无法获取上传凭证");
-        setFileItems((prev) => prev.map((f, i) => (i === index ? { ...f, status: "pending" as const, progress: 0 } : f)));
-        return;
-      }
-
       const name = `resources/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${item.file.name.replace(/[^a-zA-Z0-9.\\-_]/g, "_")}`;
 
       const blob = await upload(name, item.file, {
         access: "public",
-        token: tokenData.token,
+        handleUploadUrl: "/api/upload/file",
+        onUploadProgress: (evt) => {
+          setFileItems((prev) => prev.map((f, i) =>
+            i === index ? { ...f, progress: evt.percentage } : f
+          ));
+        },
       });
 
       setFileItems((prev) => prev.map((f, i) =>
@@ -101,14 +97,10 @@ export default function UploadPage() {
     setImageUploading(true);
 
     try {
-      const tokenRes = await fetch("/api/upload/token");
-      const tokenData = await tokenRes.json();
-      if (!tokenData.token) { setError(tokenData.error || "无法获取凭证"); setImageUploading(false); return; }
-
       const urls: string[] = [];
       for (const img of images) {
         const name = `resources/${Date.now()}-${crypto.randomUUID().slice(0, 8)}-${img.name.replace(/[^a-zA-Z0-9.\\-_]/g, "_")}`;
-        const blob = await upload(name, img, { access: "public", handleUploadUrl: "/api/upload/file", token: tokenData.token });
+        const blob = await upload(name, img, { access: "public", handleUploadUrl: "/api/upload/file" });
         urls.push(blob.url);
       }
       setUploadedImages((prev) => [...prev, ...urls]);
